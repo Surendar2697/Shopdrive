@@ -1,229 +1,146 @@
 <?php 
-require '../config/db.php';
+require_once '../config/db.php';
 
 // 1. SECURITY & SESSION CHECK
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+// Security Check: Only Vendors allowed
 if (($_SESSION['role'] ?? '') !== 'vendor') {
     header("Location: ../login.php");
     exit();
 }
 
 $vendor_id = $_SESSION['user_id'];
-$settings = $pdo->query("SELECT * FROM site_settings WHERE id = 1")->fetch();
 
-// 2. SOFT DELETE LOGIC
-if (isset($_GET['delete'])) {
-    $delete_id = $_GET['delete'];
-    
-    // Verify ownership before action
-    $check = $pdo->prepare("SELECT id FROM products WHERE id = ? AND vendor_id = ?");
-    $check->execute([$delete_id, $vendor_id]);
-    
-    if ($check->fetch()) {
-        // Mark as deleted without removing from DB
-        $stmt = $pdo->prepare("UPDATE products SET deleted_at = NOW() WHERE id = ?");
-        $stmt->execute([$delete_id]);
-        header("Location: manage_products.php?success=deleted");
-        exit();
-    }
+// Fetch settings for dynamic theme alignment
+$settings = $pdo->query("SELECT * FROM site_settings WHERE id = 1")->fetch();
+$primary_theme = $settings['primary_color'] ?? '#00bcd4';
+
+// 2. HANDLE SOFT DELETE
+if (isset($_GET['delete_id'])) {
+    $del_id = (int)$_GET['delete_id'];
+    $stmt = $pdo->prepare("UPDATE products SET deleted_at = NOW() WHERE id = ? AND vendor_id = ?");
+    $stmt->execute([$del_id, $vendor_id]);
+    header("Location: manage_products.php?status=deleted");
+    exit();
 }
 
-// 3. FETCH PRODUCTS (Filtered to exclude soft-deleted items)
-$sql = "SELECT p.*, c.name as category_name 
-        FROM products p 
-        LEFT JOIN categories c ON p.category_id = c.id 
-        WHERE p.vendor_id = ? AND p.deleted_at IS NULL 
-        ORDER BY p.id DESC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute([$vendor_id]);
-$products = $stmt->fetchAll();
-
-require '../includes/header.php'; 
+require_once '../includes/header.php'; 
 ?>
 
 <style>
-    /* DYNAMIC THEME ALIGNMENT */
-    :root { --primary-theme: <?= $settings['primary_color'] ?? '#00bcd4' ?>; }
+    :root { --primary-theme: <?= $primary_theme ?>; }
+    body { background-color: #fcfcfc; font-family: 'Segoe UI', sans-serif; }
+
+    /* Layout Components */
+    .manager-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .manager-header { padding: 1.25rem 1.5rem; background-color: #f8f9fa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    .manager-title { font-size: 13px; font-weight: 700; color: #333; margin: 0; text-transform: uppercase; }
+
+    /* Table Styling */
+    .custom-table thead th { 
+        background-color: #fff; color: #888; font-weight: 700; 
+        border-bottom: 2px solid #dee2e6; padding: 12px 20px; 
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .custom-table tbody td { padding: 15px 20px; vertical-align: middle; border-bottom: 1px solid #f1f1f1; font-size: 14px; }
+
+    /* Product Specific UI */
+    .prod-thumb { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; border: 1px solid #eee; }
+    .stock-badge { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 2px; text-transform: uppercase; }
     
-    body { background-color: #fcfcfc; font-family: 'Segoe UI', Roboto, sans-serif; }
-
-    .manager-card {
-        background: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        margin-top: 2rem;
+    .btn-action { 
+        font-size: 11px; font-weight: 700; text-transform: uppercase; 
+        text-decoration: none; padding: 5px 12px; border: 1px solid #ddd; 
+        color: #555; transition: 0.2s; 
     }
-
-    .manager-header {
-        padding: 1.5rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom: 1px solid #eee;
-        background-color: #fff;
-    }
-
-    .manager-title { font-size: 1.25rem; font-weight: 700; color: #333; margin: 0; text-transform: uppercase; }
-
-    .btn-add-custom {
-        background-color: var(--primary-theme) !important;
-        color: white !important;
-        border: none;
-        border-radius: 0;
-        font-weight: 700;
-        padding: 10px 20px;
-        font-size: 13px;
-        text-transform: uppercase;
-        text-decoration: none;
-    }
-
-    /* Professional Table Header & Rows */
-    .custom-table thead th {
-        background-color: #f8f9fa;
-        color: #000;
-        font-weight: 700;
-        border-bottom: 2px solid #dee2e6;
-        padding: 15px 20px;
-        font-size: 13px;
-        text-transform: uppercase;
-    }
-
-    .custom-table tbody td {
-        padding: 18px 20px;
-        vertical-align: middle;
-        border-bottom: 1px solid #eee;
-        font-size: 14px;
-        color: #444;
-    }
-
-    /* Product Preview Styling */
-    .product-preview-box {
-        width: 55px;
-        height: 55px;
-        border-radius: 4px;
-        object-fit: cover;
-        border: 1px solid #e2e8f0;
-        background: #f8f9fa;
-    }
-
-    .badge-status {
-        font-size: 10px;
-        font-weight: 800;
-        padding: 3px 8px;
-        border-radius: 4px;
-        text-transform: uppercase;
-        display: inline-block;
-        margin-top: 5px;
-    }
-    .status-active { background-color: #198754; color: white; }
-
-    /* Price Formatting */
-    .price-group .main-price { font-weight: 700; color: #000; display: block; }
-    .price-group .old-price { font-size: 12px; color: #999; text-decoration: line-through; }
-    .price-group .discount-tag { font-size: 11px; color: #dc3545; font-weight: 700; margin-left: 5px; }
-
-    /* Action Icon Styling */
-    .btn-action-outline {
-        border: 1px solid #ced4da;
-        background: white;
-        padding: 6px 12px;
-        border-radius: 0;
-        color: var(--primary-theme);
-        transition: 0.2s;
-        text-decoration: none;
-        display: inline-block;
-    }
-    .btn-action-outline.delete { color: #dc3545; margin-left: 5px; }
-    .btn-action-outline:hover { background: #f8f9fa; border-color: #adb5bd; }
+    .btn-edit:hover { border-color: var(--primary-theme); color: var(--primary-theme); }
+    .btn-delete:hover { border-color: #dc3545; color: #dc3545; }
 </style>
 
-<div class="container-fluid px-4 pb-5">
+<div class="container-fluid mt-4 pb-5">
     <div class="row">
-        <div class="col-md-2 py-4">
+        <div class="col-md-2 mb-4">
             <?php include '../includes/vendor_sidebar.php'; ?>
         </div>
 
         <div class="col-md-10">
-            
-            <?php if(isset($_GET['success'])): ?>
-                <div class="alert alert-success border-0 shadow-sm mb-4 rounded-0 small">
-                    <i class="bi bi-check-circle-fill me-2"></i> 
-                    Operation completed: Product listing updated.
-                </div>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="fw-bold m-0 text-uppercase" style="letter-spacing: 1px;">Inventory Management</h5>
+                <a href="upload_product.php" class="btn btn-sm btn-dark rounded-0 px-3 fw-bold" style="background: var(--primary-theme); border:none;">
+                    + ADD NEW ITEM
+                </a>
+            </div>
+
+            <?php if(isset($_GET['status']) && $_GET['status'] == 'deleted'): ?>
+                <div class="alert alert-warning rounded-0 small py-2 border-0 shadow-sm mb-4">Product has been moved to archive.</div>
             <?php endif; ?>
 
             <div class="manager-card">
                 <div class="manager-header">
-                    <h1 class="manager-title">Global Inventory Manager</h1>
-                    <a href="add_product.php" class="btn btn-add-custom shadow-sm">
-                        <i class="bi bi-plus-lg me-1"></i> Add New Product
-                    </a>
+                    <h2 class="manager-title">Active Listings</h2>
                 </div>
 
                 <div class="table-responsive">
                     <table class="table custom-table mb-0">
                         <thead>
                             <tr>
-                                <th>Preview</th>
-                                <th>Product Details</th>
+                                <th>Item Details</th>
                                 <th>Category</th>
-                                <th>Pricing (₹)</th>
+                                <th>Price (₹)</th>
                                 <th>Stock</th>
-                                <th class="text-end">Action</th>
+                                <th class="text-end">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach($products as $p): 
-                                // Fetch Cover Image
-                                $img_stmt = $pdo->prepare("SELECT image_path FROM product_images WHERE product_id = ? AND is_cover = 1 LIMIT 1");
-                                $img_stmt->execute([$p['id']]);
-                                $cover = $img_stmt->fetchColumn();
-                                $image_src = $cover ? "../assets/products/".$cover : "../assets/img/no-image.png";
-                                
-                                // Calculate Savings Percentage
-                                $discount = ($p['mrp'] > 0) ? round((($p['mrp'] - $p['price']) / $p['mrp']) * 100) : 0;
+                            <?php 
+                            // Fetch products with their primary image
+                            $stmt = $pdo->prepare("
+                                SELECT p.*, c.name as cat_name, 
+                                (SELECT image_path FROM product_images WHERE product_id = p.id LIMIT 1) as main_img 
+                                FROM products p 
+                                LEFT JOIN categories c ON p.category_id = c.id 
+                                WHERE p.vendor_id = ? AND p.deleted_at IS NULL 
+                                ORDER BY p.created_at DESC
+                            ");
+                            $stmt->execute([$vendor_id]);
+                            
+                            while($row = $stmt->fetch()): 
+                                $img_path = !empty($row['main_img']) ? "../assets/products/".$row['main_img'] : "../assets/img/placeholder.jpg";
                             ?>
                             <tr>
-                                <td width="80">
-                                    <img src="<?= $image_src ?>" class="product-preview-box" alt="Product">
-                                </td>
                                 <td>
-                                    <div class="fw-bold text-dark" style="letter-spacing: -0.2px;"><?= htmlspecialchars($p['name']) ?></div>
-                                    <span class="badge-status status-active">Active</span>
-                                </td>
-                                <td>
-                                    <span class="text-muted small fw-bold text-uppercase"><?= htmlspecialchars($p['category_name'] ?? 'General') ?></span>
-                                </td>
-                                <td>
-                                    <div class="price-group">
-                                        <span class="main-price">₹<?= number_format($p['price'], 2) ?></span>
-                                        <span class="old-price">₹<?= number_format($p['mrp'], 2) ?></span>
-                                        <?php if($discount > 0): ?>
-                                            <span class="discount-tag"><?= $discount ?>% OFF</span>
-                                        <?php endif; ?>
+                                    <div class="d-flex align-items-center">
+                                        <img src="<?= $img_path ?>" class="prod-thumb me-3 shadow-sm">
+                                        <div>
+                                            <span class="fw-bold text-dark d-block"><?= htmlspecialchars($row['name']) ?></span>
+                                            <small class="text-muted">#PRD-<?= $row['id'] ?></small>
+                                        </div>
                                     </div>
                                 </td>
+                                <td><span class="small fw-bold text-muted text-uppercase"><?= htmlspecialchars($row['cat_name'] ?? 'Uncategorized') ?></span></td>
+                                <td class="fw-bold">₹<?= number_format($row['price'], 2) ?></td>
                                 <td>
-                                    <span class="fw-bold"><?= $p['stock'] ?></span> <small class="text-muted">pcs</small>
+                                    <?php if($row['stock'] > 10): ?>
+                                        <span class="stock-badge bg-light text-success border border-success">In Stock: <?= $row['stock'] ?></span>
+                                    <?php elseif($row['stock'] > 0): ?>
+                                        <span class="stock-badge bg-light text-warning border border-warning">Low: <?= $row['stock'] ?></span>
+                                    <?php else: ?>
+                                        <span class="stock-badge bg-light text-danger border border-danger">Out of Stock</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="text-end">
-                                    <a href="edit_product.php?id=<?= $p['id'] ?>" class="btn-action-outline" title="Edit">
-                                        <i class="bi bi-pencil-square"></i>
-                                    </a>
-                                    <a href="?delete=<?= $p['id'] ?>" class="btn-action-outline delete" onclick="return confirm('Move this product to trash? Item can be restored by admin.')" title="Trash">
-                                        <i class="bi bi-trash3"></i>
-                                    </a>
+                                    <a href="edit_product.php?id=<?= $row['id'] ?>" class="btn-action btn-edit me-1">Edit</a>
+                                    <a href="manage_products.php?delete_id=<?= $row['id'] ?>" class="btn-action btn-delete" onclick="return confirm('Archive this product?')">Delete</a>
                                 </td>
                             </tr>
-                            <?php endforeach; ?>
+                            <?php endwhile; ?>
 
-                            <?php if(empty($products)): ?>
+                            <?php if($stmt->rowCount() == 0): ?>
                                 <tr>
-                                    <td colspan="6" class="text-center py-5">
-                                        <i class="bi bi-box2 fs-1 text-muted opacity-25 d-block"></i>
-                                        <p class="text-muted mt-2">No active products in your inventory.</p>
-                                        <a href="add_product.php" class="text-primary fw-bold text-decoration-none small">List your first product →</a>
+                                    <td colspan="5" class="text-center py-5 text-muted">
+                                        <i class="bi bi-box2 display-4 d-block mb-3"></i>
+                                        No products found. Start by adding your first item.
                                     </td>
                                 </tr>
                             <?php endif; ?>
@@ -235,4 +152,4 @@ require '../includes/header.php';
     </div>
 </div>
 
-<?php include '../includes/footer.php'; ?>
+<?php require_once '../includes/footer.php'; ?>

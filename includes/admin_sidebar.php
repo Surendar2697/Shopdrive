@@ -22,6 +22,10 @@ $active_bg = $primary_color ?? '#2563eb';
         <a href="dashboard.php" class="list-group-item list-group-item-action border-0 py-3 <?= basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active-theme' : '' ?>">
             <i class="bi bi-speedometer2 me-2"></i> Dashboard
         </a>
+
+        <a href="manage_orders.php" class="list-group-item list-group-item-action border-0 py-3 <?= basename($_SERVER['PHP_SELF']) == 'manage_orders.php' ? 'active-theme' : '' ?>">
+            <i class="bi bi-cart-check me-2"></i> Manage Orders
+        </a>
         
         <a href="manage_products.php" class="list-group-item list-group-item-action border-0 py-3 <?= basename($_SERVER['PHP_SELF']) == 'manage_products.php' ? 'active-theme' : '' ?>">
             <i class="bi bi-box-seam me-2"></i> Manage Products
