@@ -46,6 +46,10 @@ $active_bg = $primary_color ?? '#2563eb';
                 <i class="bi bi-people me-2"></i> Manage Users
             </a>
 
+            <a href="payments.php" class="list-group-item list-group-item-action border-0 py-3 <?= basename($_SERVER['PHP_SELF']) == 'payments.php' ? 'active-theme' : '' ?>">
+                <i class="bi bi-credit-card me-2"></i> Payments
+            </a>
+
             <a href="settings.php" class="list-group-item list-group-item-action border-0 py-3 <?= basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active-theme' : '' ?>">
                 <i class="bi bi-gear me-2"></i> Site Settings
             </a>

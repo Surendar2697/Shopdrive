@@ -1,9 +1,9 @@
-<?php 
+<?php
+ob_start();
 require_once '../config/db.php';
-
-// 1. SECURITY & SESSION CHECK
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 
+// Protection: Vendor Only
 if (($_SESSION['role'] ?? '') !== 'vendor') {
     header("Location: ../login.php");
     exit();
@@ -11,45 +11,59 @@ if (($_SESSION['role'] ?? '') !== 'vendor') {
 
 $vendor_id = $_SESSION['user_id'];
 
-// Fetch settings for dynamic theme alignment
-$settings = $pdo->query("SELECT * FROM site_settings WHERE id = 1")->fetch();
-$primary_theme = $settings['primary_color'] ?? '#00bcd4';
+require_once '../includes/header.php';
 
-// 2. FINANCIAL CALCULATIONS (Vendor specific)
-
-// Total Earned (Items sold in 'paid' orders)
-$total_earned = $pdo->prepare("SELECT SUM(oi.price * oi.quantity) FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id WHERE p.vendor_id = ? AND o.payment_status = 'paid'");
+// 1. Fetch Totals for the Vendor
+// Total Earned (All items sold)
+$total_earned = $pdo->prepare("SELECT SUM(oi.price * oi.quantity) FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE p.vendor_id = ? AND payout_status = 'released'");
 $total_earned->execute([$vendor_id]);
-$total_earned = $total_earned->fetchColumn() ?? 0;
+$earned_val = $total_earned->fetchColumn() ?: 0;
 
-// Total already processed by Admin
-$total_paid_out = $pdo->prepare("SELECT SUM(amount) FROM vendor_payouts WHERE vendor_id = ? AND status = 'completed'");
-$total_paid_out->execute([$vendor_id]);
-$total_paid_out = $total_paid_out->fetchColumn() ?? 0;
+// Pending Payout (Items sold but admin hasn't released payment)
+$pending_payout = $pdo->prepare("SELECT SUM(oi.price * oi.quantity) FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE p.vendor_id = ? AND payout_status = 'pending'");
+$pending_payout->execute([$vendor_id]);
+$pending_val = $pending_payout->fetchColumn() ?: 0;
 
-$current_balance = $total_earned - $total_paid_out;
+// 2. Fetch Detailed Transaction History
+$query = "SELECT 
+            oi.order_id,
+            oi.price as unit_price,
+            oi.quantity,
+            oi.payout_status,
+            oi.payout_date,
+            o.created_at as order_date,
+            p.name as product_name
+          FROM order_items oi
+          JOIN orders o ON oi.order_id = o.id
+          JOIN products p ON oi.product_id = p.id
+          WHERE p.vendor_id = ?
+          ORDER BY o.created_at DESC";
 
-require_once '../includes/header.php'; 
+$stmt = $pdo->prepare($query);
+$stmt->execute([$vendor_id]);
+$transactions = $stmt->fetchAll();
+
+$primary_theme = $brand['primary_color'] ?? '#2563eb';
 ?>
 
 <style>
-    :root { --primary-theme: <?= $primary_theme ?>; }
-    body { background-color: #fcfcfc; font-family: 'Segoe UI', sans-serif; }
-
-    /* Manager & Stat Cards */
-    .manager-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-    .manager-header { padding: 1.25rem 1.5rem; background-color: #f8f9fa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-    .manager-title { font-size: 13px; font-weight: 700; color: #333; margin: 0; text-transform: uppercase; }
-
-    .stat-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 20px; display: flex; align-items: center; justify-content: space-between; height: 100%; border-bottom: 3px solid #eee; }
-    .stat-label { font-size: 10px; font-weight: 800; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-    .stat-value { font-size: 22px; font-weight: 700; color: #000; margin-top: 5px; }
+    :root { --vendor-theme: <?= $primary_theme ?>; }
+    body { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
     
-    /* Table Styling */
-    .custom-table thead th { background-color: #fff; color: #888; font-weight: 700; border-bottom: 2px solid #dee2e6; padding: 12px 20px; font-size: 11px; text-transform: uppercase; }
-    .custom-table tbody td { padding: 15px 20px; border-bottom: 1px solid #f1f1f1; font-size: 14px; }
+    .wallet-card { background: #fff; border-radius: 12px; padding: 25px; border: 1px solid #e2e8f0; height: 100%; }
+    .wallet-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
+    .wallet-balance { font-size: 28px; font-weight: 800; color: #1e293b; margin-top: 5px; }
     
-    .status-badge { font-size: 9px; font-weight: 800; padding: 4px 10px; border-radius: 50px; text-transform: uppercase; }
+    .history-card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-top: 30px; }
+    .table thead th { 
+        background: #f8fafc; font-size: 10px; text-transform: uppercase; 
+        color: #64748b; padding: 15px; border-bottom: 2px solid #edf2f7;
+    }
+    .table td { vertical-align: middle; padding: 15px; font-size: 13px; color: #334155; }
+    
+    .payout-status { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 50px; }
+    .status-pending { background: #fffbeb; color: #92400e; border: 1px solid #fef3c7; }
+    .status-released { background: #f0fdf4; color: #166534; border: 1px solid #dcfce7; }
 </style>
 
 <div class="container-fluid mt-4 pb-5">
@@ -58,77 +72,78 @@ require_once '../includes/header.php';
             <?php include '../includes/vendor_sidebar.php'; ?>
         </div>
 
-        <div class="col-md-10">
-            <h5 class="fw-bold mb-4 text-uppercase" style="letter-spacing: 1px;">Payment & Earnings Report</h5>
+        <div class="col-md-10 px-4">
+            <h4 class="fw-bold mb-4">Earnings & Payouts</h4>
 
-            <div class="row g-3 mb-4">
+            <div class="row g-4">
                 <div class="col-md-4">
-                    <div class="stat-card" style="border-bottom-color: var(--primary-theme);">
-                        <div>
-                            <div class="stat-label">Lifetime Revenue</div>
-                            <div class="stat-value">₹<?= number_format($total_earned, 2) ?></div>
-                        </div>
-                        <i class="bi bi-graph-up-arrow fs-3 text-muted opacity-25"></i>
+                    <div class="wallet-card border-start border-4 border-success">
+                        <span class="wallet-label">Total Withdrawn</span>
+                        <div class="wallet-balance">₹<?= number_format($earned_val, 2) ?></div>
+                        <p class="small text-muted mb-0 mt-2">Payments already released to your account.</p>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="stat-card" style="border-bottom-color: #198754;">
-                        <div>
-                            <div class="stat-label">Outstanding Balance</div>
-                            <div class="stat-value">₹<?= number_format($current_balance, 2) ?></div>
-                        </div>
-                        <i class="bi bi-wallet2 fs-3 text-muted opacity-25"></i>
+                    <div class="wallet-card border-start border-4 border-warning">
+                        <span class="wallet-label">Pending Settlement</span>
+                        <div class="wallet-balance text-warning">₹<?= number_format($pending_val, 2) ?></div>
+                        <p class="small text-muted mb-0 mt-2">Funds held until admin approval.</p>
                     </div>
                 </div>
                 <div class="col-md-4">
-                    <div class="stat-card" style="border-bottom-color: #6f42c1;">
-                        <div>
-                            <div class="stat-label">Total Payouts Received</div>
-                            <div class="stat-value">₹<?= number_format($total_paid_out, 2) ?></div>
-                        </div>
-                        <i class="bi bi-bank fs-3 text-muted opacity-25"></i>
+                    <div class="wallet-card bg-dark text-white">
+                        <span class="wallet-label text-white-50">Total Revenue</span>
+                        <div class="wallet-balance text-white">₹<?= number_format($earned_val + $pending_val, 2) ?></div>
+                        <p class="small text-white-50 mb-0 mt-2">Your lifetime sales on this platform.</p>
                     </div>
                 </div>
             </div>
 
-            <div class="manager-card">
-                <div class="manager-header">
-                    <h2 class="manager-title">Payout Settlement History</h2>
+            <div class="history-card shadow-sm">
+                <div class="p-3 border-bottom bg-light">
+                    <h6 class="m-0 fw-bold">Recent Transactions</h6>
                 </div>
                 <div class="table-responsive">
-                    <table class="table custom-table mb-0">
+                    <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>Ref ID</th>
-                                <th>Settlement Date</th>
-                                <th>Amount</th>
-                                <th>Transfer Method</th>
-                                <th class="text-end">Status</th>
+                                <th>Order ID</th>
+                                <th>Item Details</th>
+                                <th>Net Amount</th>
+                                <th>Payout Status</th>
+                                <th>Release Date</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php 
-                            $stmt = $pdo->prepare("SELECT * FROM vendor_payouts WHERE vendor_id = ? ORDER BY created_at DESC");
-                            $stmt->execute([$vendor_id]);
-                            while($row = $stmt->fetch()): 
-                            ?>
-                            <tr>
-                                <td class="fw-bold text-dark">#TXN-<?= $row['id'] ?></td>
-                                <td class="text-muted small"><?= date('d M, Y', strtotime($row['created_at'])) ?></td>
-                                <td class="fw-bold text-success">+ ₹<?= number_format($row['amount'], 2) ?></td>
-                                <td class="text-muted small text-uppercase"><?= htmlspecialchars($row['payment_method']) ?></td>
-                                <td class="text-end">
-                                    <?php if($row['status'] == 'completed'): ?>
-                                        <span class="status-badge bg-success text-white">Settled</span>
-                                    <?php else: ?>
-                                        <span class="status-badge bg-secondary text-white">In Process</span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                            <?php endwhile; ?>
-                            
-                            <?php if($stmt->rowCount() == 0): ?>
-                                <tr><td colspan="5" class="text-center py-5 text-muted small">No settlement history found.</td></tr>
+                            <?php if (empty($transactions)): ?>
+                                <tr>
+                                    <td colspan="5" class="text-center py-5 text-muted">No transactions found yet.</td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach($transactions as $t): 
+                                    $subtotal = $t['unit_price'] * $t['quantity'];
+                                    $released = ($t['payout_status'] == 'released');
+                                ?>
+                                <tr>
+                                    <td class="fw-bold">#ORD-<?= $t['order_id'] ?></td>
+                                    <td>
+                                        <div class="fw-bold"><?= htmlspecialchars($t['product_name']) ?></div>
+                                        <div class="text-muted small">Qty: <?= $t['quantity'] ?> @ ₹<?= number_format($t['unit_price'], 2) ?></div>
+                                    </td>
+                                    <td class="fw-bold text-dark">₹<?= number_format($subtotal, 2) ?></td>
+                                    <td>
+                                        <span class="payout-status <?= $released ? 'status-released' : 'status-pending' ?>">
+                                            <i class="bi <?= $released ? 'bi-check-circle-fill' : 'bi-clock-history' ?> me-1"></i>
+                                            <?= $released ? 'RELEASED' : 'PENDING' ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted small">
+                                            <?= $t['payout_date'] ? date('d M Y', strtotime($t['payout_date'])) : 'Waiting for Admin...' ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
                             <?php endif; ?>
                         </tbody>
                     </table>
