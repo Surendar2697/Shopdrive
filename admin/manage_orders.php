@@ -12,24 +12,28 @@ if (($_SESSION['role'] ?? '') !== 'super_admin') {
 }
 
 // ---------------------------------------------------------
-// AJAX UPDATE HANDLER (Keep your existing logic here)
+// AJAX UPDATE HANDLER: UPDATED FOR PER-ITEM TRACKING
 // ---------------------------------------------------------
-if (isset($_POST['action']) && $_POST['action'] == 'update_order') {
+if (isset($_POST['action'])) {
     ob_clean(); 
     header('Content-Type: application/json');
     try {
-        $order_id = $_POST['order_id'];
-        $payment_status = $_POST['payment_status'];
-        $order_status = $_POST['order_status'];
-        $courier_name = $_POST['courier_name'] ?? '';
-        $tracking_id = $_POST['tracking_id'] ?? '';
-        $tracking_link = $_POST['tracking_link'] ?? '';
-
-        $update = $pdo->prepare("UPDATE orders SET 
-            payment_status = ?, order_status = ?, courier_name = ?, 
-            tracking_id = ?, tracking_link = ? WHERE id = ?");
-        
-        $update->execute([$payment_status, $order_status, $courier_name, $tracking_id, $tracking_link, $order_id]);
+        if ($_POST['action'] == 'update_global_status') {
+            // Update Global Order Status & Payment
+            $update = $pdo->prepare("UPDATE orders SET payment_status = ?, order_status = ? WHERE id = ?");
+            $update->execute([$_POST['payment_status'], $_POST['order_status'], $_POST['order_id']]);
+        } 
+        elseif ($_POST['action'] == 'update_item_tracking') {
+            // Update Tracking for a specific item
+            $update = $pdo->prepare("UPDATE order_items SET courier_name = ?, tracking_id = ?, tracking_link = ?, item_status = ? WHERE id = ?");
+            $update->execute([
+                $_POST['courier_name'], 
+                $_POST['tracking_id'], 
+                $_POST['tracking_link'], 
+                $_POST['item_status'], 
+                $_POST['item_id']
+            ]);
+        }
         echo json_encode(['status' => 'success']);
     } catch (Exception $e) {
         http_response_code(500);
@@ -48,29 +52,21 @@ $theme_color = $brand['primary_color'] ?? '#2563eb';
 <style>
     :root { --admin-theme: <?= $theme_color ?>; }
     body { background-color: #f4f7f6; font-family: 'Segoe UI', sans-serif; }
-    .search-box { border-radius: 50px; padding: 10px 25px; border: 1px solid #e0e0e0; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+    .search-box { border-radius: 50px; padding: 10px 25px; border: 1px solid #e0e0e0; }
     
-    .order-card { 
-        background: #fff; border-radius: 12px; border: none; margin-bottom: 25px; 
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 6px solid #ccc;
-    }
+    .order-card { background: #fff; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 6px solid #ccc; }
     .status-ordered { border-left-color: var(--admin-theme); }
     .status-shipped { border-left-color: #ffc107; }
     .status-delivered { border-left-color: #28a745; }
 
     .card-label { font-size: 10px; font-weight: 800; color: #999; text-transform: uppercase; margin-bottom: 8px; display: block; letter-spacing: 0.5px; }
     
-    /* Product Table Styling */
-    .product-details-area { background: #fafafa; border-radius: 8px; padding: 15px; margin-top: 15px; border: 1px solid #eee; }
-    .prod-table { width: 100%; font-size: 13px; }
-    .prod-table th { color: #888; font-weight: 700; padding-bottom: 10px; border-bottom: 1px solid #eee; text-transform: uppercase; font-size: 10px; }
-    .prod-table td { padding: 10px 0; border-bottom: 1px solid #f1f1f1; }
-    .prod-table tr:last-child td { border-bottom: none; }
+    /* Itemized Tracking Table */
+    .tracking-area { background: #fff; border: 1px solid #edf2f7; border-radius: 8px; padding: 15px; margin-top: 15px; }
+    .item-tracking-row { border-bottom: 1px solid #f1f1f1; padding: 15px 0; }
+    .item-tracking-row:last-child { border-bottom: none; }
     
-    .btn-update-custom { 
-        background: var(--admin-theme); color: #fff; border: none; 
-        padding: 8px 25px; border-radius: 50px; font-weight: 700; font-size: 12px; transition: 0.3s;
-    }
+    .btn-save-sm { font-size: 10px; font-weight: 700; padding: 5px 15px; border-radius: 4px; background: var(--admin-theme); color: white; border: none; }
 </style>
 
 <div class="container-fluid mt-4 pb-5">
@@ -89,86 +85,95 @@ $theme_color = $brand['primary_color'] ?? '#2563eb';
                     <div class="bg-light px-4 py-2 border-bottom d-flex justify-content-between align-items-center rounded-top">
                         <span class="fw-bold">#ORD-<?= $o['id'] ?></span>
                         <div>
-                            <span class="small text-muted me-3"><?= date('d M Y, h:i A', strtotime($o['created_at'])) ?></span>
+                            <span class="small text-muted me-3"><?= date('d M Y', strtotime($o['created_at'])) ?></span>
                             <span class="badge bg-white text-dark border px-3">Total: ₹<?= number_format($o['total_amount'], 2) ?></span>
                         </div>
                     </div>
                     
                     <div class="p-4">
-                        <div class="row g-4">
-                            <div class="col-md-3 border-end">
+                        <div class="row g-4 mb-4">
+                            <div class="col-md-4 border-end">
                                 <span class="card-label">Customer & Shipping</span>
                                 <div class="fw-bold mb-1" style="color: var(--admin-theme);"><?= htmlspecialchars($o['fullname']) ?></div>
                                 <div class="small text-muted lh-sm"><?= nl2br(htmlspecialchars($o['shipping_address'])) ?></div>
                             </div>
 
-                            <div class="col-md-3 border-end">
-                                <span class="card-label">Order Management</span>
-                                <div class="mb-3">
-                                    <label class="small text-muted mb-1">Payment Status</label>
-                                    <select class="form-select form-select-sm" id="pay_<?= $o['id'] ?>">
-                                        <option value="pending" <?= $o['payment_status'] == 'pending' ? 'selected' : '' ?>>Pending</option>
-                                        <option value="paid" <?= $o['payment_status'] == 'paid' ? 'selected' : '' ?>>Paid</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="small text-muted mb-1">Logistics Progress</label>
-                                    <select class="form-select form-select-sm fw-bold" id="ord_<?= $o['id'] ?>">
-                                        <option value="ordered" <?= $o['order_status'] == 'ordered' ? 'selected' : '' ?>>Ordered</option>
-                                        <option value="shipped" <?= $o['order_status'] == 'shipped' ? 'selected' : '' ?>>Shipped</option>
-                                        <option value="delivered" <?= $o['order_status'] == 'delivered' ? 'selected' : '' ?>>Delivered</option>
-                                    </select>
+                            <div class="col-md-4 border-end">
+                                <span class="card-label">Global Status (System Wide)</span>
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <select class="form-select form-select-sm" id="pay_<?= $o['id'] ?>">
+                                            <option value="pending" <?= $o['payment_status'] == 'pending' ? 'selected' : '' ?>>Pending</option>
+                                            <option value="paid" <?= $o['payment_status'] == 'paid' ? 'selected' : '' ?>>Paid</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
+                                        <select class="form-select form-select-sm fw-bold" id="ord_<?= $o['id'] ?>">
+                                            <option value="ordered" <?= $o['order_status'] == 'ordered' ? 'selected' : '' ?>>Ordered</option>
+                                            <option value="shipped" <?= $o['order_status'] == 'shipped' ? 'selected' : '' ?>>Shipped</option>
+                                            <option value="delivered" <?= $o['order_status'] == 'delivered' ? 'selected' : '' ?>>Delivered</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12 mt-2">
+                                        <button onclick="updateGlobal(<?= $o['id'] ?>)" class="btn btn-dark btn-sm w-100 fw-bold" style="font-size: 11px;">Update Global Status</button>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="col-md-6">
-                                <span class="card-label">Courier & Tracking</span>
-                                <div class="row g-2 mb-3">
-                                    <div class="col-4"><input type="text" class="form-control form-control-sm" id="cour_<?= $o['id'] ?>" placeholder="Courier" value="<?= htmlspecialchars($o['courier_name'] ?? '') ?>"></div>
-                                    <div class="col-4"><input type="text" class="form-control form-control-sm" id="track_<?= $o['id'] ?>" placeholder="Tracking ID" value="<?= htmlspecialchars($o['tracking_id'] ?? '') ?>"></div>
-                                    <div class="col-4"><input type="text" class="form-control form-control-sm" id="link_<?= $o['id'] ?>" placeholder="Live Link" value="<?= htmlspecialchars($o['tracking_link'] ?? '') ?>"></div>
-                                </div>
-                                <div class="text-end">
-                                    <button onclick="updateOrder(<?= $o['id'] ?>)" id="btn_<?= $o['id'] ?>" class="btn-update-custom shadow-sm">Save Changes</button>
-                                </div>
+                            <div class="col-md-4 text-center">
+                                <span class="card-label">Order Type</span>
+                                <?php
+                                    $v_check = $pdo->prepare("SELECT COUNT(DISTINCT p.vendor_id) FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
+                                    $v_check->execute([$o['id']]);
+                                    $v_count = $v_check->fetchColumn();
+                                ?>
+                                <span class="badge <?= $v_count > 1 ? 'bg-danger' : 'bg-primary' ?> px-4 py-2 mt-2">
+                                    <?= $v_count > 1 ? 'MULTI-VENDOR ('.$v_count.')' : 'SINGLE VENDOR' ?>
+                                </span>
                             </div>
                         </div>
 
-                        <div class="product-details-area">
-                            <span class="card-label">Itemized Breakdown</span>
-                            <table class="prod-table">
-                                <thead>
-                                    <tr>
-                                        <th>Product Name</th>
-                                        <th>Vendor</th>
-                                        <th class="text-center">Qty</th>
-                                        <th class="text-end">Unit Price</th>
-                                        <th class="text-end">Subtotal</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php 
-                                    $items = $pdo->prepare("
-                                        SELECT oi.*, p.name as prod_name, v.fullname as vendor_name 
-                                        FROM order_items oi 
-                                        JOIN products p ON oi.product_id = p.id 
-                                        JOIN users v ON p.vendor_id = v.id 
-                                        WHERE oi.order_id = ?
-                                    ");
-                                    $items->execute([$o['id']]);
-                                    while($it = $items->fetch()):
-                                        $subtotal = $it['price'] * $it['quantity'];
-                                    ?>
-                                    <tr>
-                                        <td class="fw-bold"><?= htmlspecialchars($it['prod_name']) ?></td>
-                                        <td><span class="badge bg-light text-dark border fw-normal">@<?= htmlspecialchars($it['vendor_name']) ?></span></td>
-                                        <td class="text-center"><?= $it['quantity'] ?></td>
-                                        <td class="text-end">₹<?= number_format($it['price'], 2) ?></td>
-                                        <td class="text-end fw-bold">₹<?= number_format($subtotal, 2) ?></td>
-                                    </tr>
-                                    <?php endwhile; ?>
-                                </tbody>
-                            </table>
+                        <div class="tracking-area">
+                            <span class="card-label">Individual Item Tracking & Fulfillment</span>
+                            <?php 
+                            $items = $pdo->prepare("
+                                SELECT oi.*, p.name as prod_name, v.fullname as vendor_name 
+                                FROM order_items oi 
+                                JOIN products p ON oi.product_id = p.id 
+                                JOIN users v ON p.vendor_id = v.id 
+                                WHERE oi.order_id = ?
+                            ");
+                            $items->execute([$o['id']]);
+                            while($it = $items->fetch()):
+                            ?>
+                            <div class="item-tracking-row" id="item_row_<?= $it['id'] ?>">
+                                <div class="row align-items-center g-3">
+                                    <div class="col-md-3">
+                                        <div class="fw-bold small"><?= htmlspecialchars($it['prod_name']) ?></div>
+                                        <span class="badge bg-light text-dark border fw-normal" style="font-size: 10px;">@<?= htmlspecialchars($it['vendor_name']) ?></span>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select form-select-sm fw-bold" id="item_status_<?= $it['id'] ?>">
+                                            <option value="ordered" <?= $it['item_status'] == 'ordered' ? 'selected' : '' ?>>Ordered</option>
+                                            <option value="shipped" <?= $it['item_status'] == 'shipped' ? 'selected' : '' ?>>Shipped</option>
+                                            <option value="delivered" <?= $it['item_status'] == 'delivered' ? 'selected' : '' ?>>Delivered</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <input type="text" class="form-control form-control-sm" id="it_cour_<?= $it['id'] ?>" placeholder="Courier" value="<?= htmlspecialchars($it['courier_name'] ?? '') ?>">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <input type="text" class="form-control form-control-sm" id="it_track_<?= $it['id'] ?>" placeholder="Tracking ID" value="<?= htmlspecialchars($it['tracking_id'] ?? '') ?>">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <input type="text" class="form-control form-control-sm" id="it_link_<?= $it['id'] ?>" placeholder="Link" value="<?= htmlspecialchars($it['tracking_link'] ?? '') ?>">
+                                    </div>
+                                    <div class="col-md-1">
+                                        <button onclick="updateItemTracking(<?= $it['id'] ?>)" class="btn-save-sm">Save</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endwhile; ?>
                         </div>
                     </div>
                 </div>
@@ -180,7 +185,54 @@ $theme_color = $brand['primary_color'] ?? '#2563eb';
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-// (Keep your existing Search and updateOrder AJAX scripts here)
+// Search Functionality
+$('#orderSearch').on('keyup', function() {
+    var value = $(this).val().toLowerCase();
+    $(".searchable-item").filter(function() {
+        $(this).toggle($(this).data('customer').indexOf(value) > -1 || $(this).data('id').toString().indexOf(value) > -1)
+    });
+});
+
+// Update Global Order Status
+function updateGlobal(id) {
+    $.ajax({
+        url: 'manage_orders.php',
+        method: 'POST',
+        data: {
+            action: 'update_global_status',
+            order_id: id,
+            payment_status: $('#pay_' + id).val(),
+            order_status: $('#ord_' + id).val()
+        },
+        success: function(res) {
+            if(res.status === 'success') {
+                alert('Global status updated!');
+                location.reload();
+            }
+        }
+    });
+}
+
+// Update Individual Item Tracking
+function updateItemTracking(itemId) {
+    $.ajax({
+        url: 'manage_orders.php',
+        method: 'POST',
+        data: {
+            action: 'update_item_tracking',
+            item_id: itemId,
+            item_status: $('#item_status_' + itemId).val(),
+            courier_name: $('#it_cour_' + itemId).val(),
+            tracking_id: $('#it_track_' + itemId).val(),
+            tracking_link: $('#it_link_' + itemId).val()
+        },
+        success: function(res) {
+            if(res.status === 'success') {
+                alert('Item tracking updated!');
+            }
+        }
+    });
+}
 </script>
 
 <?php include '../includes/footer.php'; ?>

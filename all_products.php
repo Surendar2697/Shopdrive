@@ -30,7 +30,7 @@ $primary_theme = $settings['primary_color'] ?? '#2563eb';
     .inventory-card:hover { transform: translateY(-8px); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); border-color: var(--primary-theme); }
     
     .img-frame { height: 250px; padding: 30px; display: flex; align-items: center; justify-content: center; background: #fff; position: relative; }
-    .img-frame img { max-height: 100%; max-width: 100%; object-fit: contain; }
+    .img-frame img { height: 250px; max-width: 100%; object-fit: contain; }
 
     /* Wishlist Icon - Circular Glass Style */
     .wishlist-btn {

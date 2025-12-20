@@ -72,7 +72,7 @@ $discount = ($mrp > 0) ? round((($mrp - $price) / $mrp) * 100) : 0;
     .product-actions { display: flex; align-items: center; gap: 12px; margin-top: 35px; }
 
     .btn-add-cart {
-        background: #4a0404 !important; /* Deep Maroon/Brown from image */
+        background: var(--primary-theme) !important; /* Deep Maroon/Brown from image */
         color: #fff !important; border: none; flex: 1; padding: 16px;
         font-weight: 700; text-transform: uppercase; font-size: 14px;
         display: flex; align-items: center; justify-content: center; gap: 10px;
